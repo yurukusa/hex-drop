@@ -1,4 +1,4 @@
-import { WORLD_W, WORLD_H, GROUND_X_MIN, GROUND_X_MAX, GROUND_Y, GROUND_HEIGHT } from './physics.js';
+import { WORLD_W, WORLD_H, GROUND_X_MIN, GROUND_X_MAX, GROUND_Y, GROUND_HEIGHT, CELL_SIZE } from './physics.js';
 
 export class Renderer {
   constructor(canvas) {
@@ -38,7 +38,6 @@ export class Renderer {
     };
   }
 
-  // フレーム冒頭: 純黒で完全クリア（蛍光管風には残像より黒の透明感が映える）
   clear() {
     const ctx = this.ctx;
     ctx.globalCompositeOperation = 'source-over';
@@ -61,7 +60,6 @@ export class Renderer {
 
   drawBackground() {
     const ctx = this.ctx;
-    // 着地有効ゾーン（土台）も枠線だけのネオン管に統一
     const x = GROUND_X_MIN;
     const y = GROUND_Y - GROUND_HEIGHT / 2;
     const w = GROUND_X_MAX - GROUND_X_MIN;
@@ -82,12 +80,12 @@ export class Renderer {
     ctx.shadowBlur = 0;
   }
 
-  // 蛍光ネオン管風: 中身は描かず、外側ハロー + 内側白芯の二重ストロークだけ
+  // 単一矩形ピース。外周は強発光ネオン、内側にセル分割線（控えめ）で
+  // 「複数セルが組み合わさった一つのブロック」として見せる。
   drawBlock(body) {
-    const ctx = this.ctx;
-    const { hue, w, h, fadeMs } = body.render;
     if (this.isOffscreen(body)) return;
-
+    const ctx = this.ctx;
+    const { hue, w, h, wCells, hCells, fadeMs } = body.render;
     const alpha = fadeMs > 0 ? Math.max(0, 1 - fadeMs / 200) : 1;
 
     ctx.save();
@@ -95,19 +93,38 @@ export class Renderer {
     ctx.rotate(body.angle);
     ctx.globalAlpha = alpha;
 
-    // 外側のハロー（強グロー）
-    ctx.shadowBlur = 24;
+    // 外周ハロー
+    ctx.shadowBlur = 26;
     ctx.shadowColor = `hsl(${hue}, 90%, 60%)`;
     ctx.lineWidth = 3;
     ctx.strokeStyle = `hsl(${hue}, 95%, 72%)`;
     ctx.strokeRect(-w / 2, -h / 2, w, h);
 
-    // 内側の白い芯（蛍光管のガス光ってる芯）
+    // 内側白芯
     ctx.shadowBlur = 8;
-    ctx.shadowColor = `hsl(${hue}, 90%, 85%)`;
-    ctx.lineWidth = 1.4;
+    ctx.shadowColor = `hsl(${hue}, 90%, 88%)`;
+    ctx.lineWidth = 1.3;
     ctx.strokeStyle = `hsl(${hue}, 95%, 95%)`;
     ctx.strokeRect(-w / 2, -h / 2, w, h);
+
+    // 内側セル分割線（複数セルピースなら）
+    if (wCells > 1 || hCells > 1) {
+      ctx.shadowBlur = 0;
+      ctx.lineWidth = 0.8;
+      ctx.strokeStyle = `hsla(${hue}, 80%, 75%, 0.35)`;
+      ctx.beginPath();
+      for (let i = 1; i < wCells; i++) {
+        const x = -w / 2 + (i / wCells) * w;
+        ctx.moveTo(x, -h / 2 + 5);
+        ctx.lineTo(x, h / 2 - 5);
+      }
+      for (let j = 1; j < hCells; j++) {
+        const y = -h / 2 + (j / hCells) * h;
+        ctx.moveTo(-w / 2 + 5, y);
+        ctx.lineTo(w / 2 - 5, y);
+      }
+      ctx.stroke();
+    }
 
     ctx.shadowBlur = 0;
     ctx.restore();
@@ -121,8 +138,6 @@ export class Renderer {
     ctx.translate(body.position.x, body.position.y);
     ctx.rotate(body.angle);
 
-    // 物理エンジン側の頂点配置に合わせるため offset = PI/6（i=0 が右下、面が水平に来る向き）。
-    // body.angle に PI/6 を初期適用しているので、ここはオフセットなしでよい。
     ctx.beginPath();
     for (let i = 0; i < 6; i++) {
       const a = (Math.PI / 3) * i + Math.PI / 6;
@@ -132,14 +147,12 @@ export class Renderer {
     }
     ctx.closePath();
 
-    // 外ハロー
     ctx.shadowBlur = 32;
     ctx.shadowColor = `hsl(${hue}, 95%, 65%)`;
     ctx.lineWidth = 4;
     ctx.strokeStyle = `hsl(${hue}, 100%, 75%)`;
     ctx.stroke();
 
-    // 内側白芯
     ctx.shadowBlur = 12;
     ctx.shadowColor = `hsl(${hue}, 95%, 90%)`;
     ctx.lineWidth = 1.6;
@@ -156,10 +169,8 @@ export class Renderer {
         || body.position.y < -m || body.position.y > WORLD_H + m;
   }
 
-  // クリア演出: パーティクル＋画面フラッシュをワールド座標で描画
   drawEffects(effects) {
     const ctx = this.ctx;
-    // パーティクル
     for (const p of effects.particles) {
       ctx.globalAlpha = Math.max(0, p.life);
       ctx.shadowBlur = 20;
@@ -174,7 +185,6 @@ export class Renderer {
     ctx.shadowBlur = 0;
   }
 
-  // フラッシュは canvas 全体に重ねるので world 座標変換の外側で呼ぶ
   drawFlash(strength) {
     if (strength <= 0) return;
     const ctx = this.ctx;

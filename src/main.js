@@ -21,6 +21,8 @@ async function boot() {
   new Input(canvas, renderer, (x, y) => game.handleTap(x, y));
 
   await game.loadStage(game.initialStage());
+  // 一時的なデバッグエクスポート（後で除去）
+  if (typeof window !== 'undefined') window.__game = game;
 
   let last = performance.now();
   function loop(now) {

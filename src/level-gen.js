@@ -1,22 +1,32 @@
-// stage 4-150 を stageNumber から決定的生成。
+// 単一矩形ピースで 10列×15段以上のグリッドを完全に埋める壁ぎっしり生成。
 //
-// 自動崩壊しない構造規則（ぐらす要件: 操作なしで失敗するクリア不能ステージは禁止）:
-//   1. 最下段は中央広幅。重心は必ず土台中央 ±50px 以内
-//   2. 各段の幅は前段以下、当段の中心は前段の左右範囲内に収める
-//      → 当段の下底面は必ず前段の上面に完全に乗る
-//   3. 六角形は最上段の真上、隙間あり
-// 難易度は段数と段ごとの中心オフセット幅で調整する（橋構造は採用せず、
-// 安定保証を最優先）。
+// 設計:
+//   - col GROUND_COL_MIN..MAX (=10セル幅) × row 0..towerHeight-1 を完全埋め
+//   - greedy fill: 大きい矩形から先に試行 → ダメなら小さく → 最後 1x1
+//   - 全セル占有保証、隙間ゼロ
+//   - 段数 15 → 22、ピース種類は段階的に解放
+//
+// 物理は単純矩形なので安定、複合剛体不要。
+import { CELL_SIZE, GRID_BASE_Y } from './physics.js';
 
-import { WORLD_W } from './physics.js';
+const GROUND_COL_MIN = 4;
+const GROUND_COL_MAX = 13;
+const TOWER_HEIGHT_BASE = 15;
 
-const CX = WORLD_W / 2;       // 360
-const Y_BASE = 1180;          // 最下段の中心Y
-const ROW_H = 40;
-const ROW_GAP = 2;
-const STEP = ROW_H + ROW_GAP;
+// 大きい順に試す（greedy fill が大きいピースを優先するため）
+const ALL_PIECE_TYPES = [
+  { w: 4, h: 1 },  // 横I
+  { w: 1, h: 4 },  // 縦I
+  { w: 3, h: 2 },  // 横長
+  { w: 2, h: 3 },  // 縦長
+  { w: 2, h: 2 },  // O
+  { w: 3, h: 1 },  // 3連横
+  { w: 1, h: 3 },  // 3連縦
+  { w: 2, h: 1 },  // 2連横
+  { w: 1, h: 2 },  // 2連縦
+  { w: 1, h: 1 },  // 単独（隙間埋め）
+];
 
-// mulberry32: ステージ番号から再現可能な擬似乱数
 function makeRand(seed) {
   let s = seed >>> 0;
   return function () {
@@ -28,61 +38,84 @@ function makeRand(seed) {
   };
 }
 
+function shuffle(arr, r) {
+  const out = arr.slice();
+  for (let i = out.length - 1; i > 0; i--) {
+    const j = Math.floor(r() * (i + 1));
+    [out[i], out[j]] = [out[j], out[i]];
+  }
+  return out;
+}
+
 export function generateStage(stageNumber) {
   const r = makeRand(stageNumber * 1009 + 17);
-  // 段数: 4〜12（stage 4 で 4段、stage 150 で 12段）
-  const progress = Math.min(1, (stageNumber - 4) / 146);
-  const N = 4 + Math.floor(progress * 8);
+  const progress = Math.min(1, (stageNumber - 1) / 149);
+
+  const towerHeight = TOWER_HEIGHT_BASE + Math.floor(progress * 7);
+
+  // 利用するピース種類数（大→小の順、最後の 1x1 は常に利用可能）
+  // Stage 1: 4種類 (4x1, 1x4, 3x2, 2x3) + 1x1 → 5種
+  // Stage 150: 全 10 種
+  const numPieceTypes = Math.min(ALL_PIECE_TYPES.length, 5 + Math.floor(progress * 5));
+  const typeBag = ALL_PIECE_TYPES.slice(0, numPieceTypes - 1);
+  // ALL_PIECE_TYPES の最後は (1,1)、これは常に隙間埋め用に保持
+  const fillerType = { w: 1, h: 1 };
+
   const baseHue = (stageNumber * 47) % 360;
+  const occupied = new Map();
+  const pieces = [];
 
-  // 非対称度の進行: 序盤は対称、後半ほど大きくずらす
-  const asymStrength = Math.min(1, Math.max(0, (stageNumber - 10) / 60));
-
-  const blocks = [];
-  let prevCx = CX;
-  let prevW = 220 + Math.floor(r() * 40); // 最下段は 220-260
-
-  blocks.push({ x: prevCx, y: Y_BASE, w: prevW, h: ROW_H, hue: baseHue });
-
-  for (let i = 1; i < N; i++) {
-    let w;
-    if (i === 1) {
-      // 二段目で一気に細くする（テトリス風の「柱が立つ」見た目）
-      w = Math.max(80, Math.floor(prevW * (0.35 + r() * 0.2)));
-    } else if (i === N - 1) {
-      // 最上段は再度幅を広めにして、六角形が乗る台座にする
-      w = Math.min(prevW, Math.max(120, Math.floor(prevW + 60 + r() * 40)));
-    } else {
-      // 中段は前段から緩やかに変動
-      const span = Math.min(40, prevW - 60);
-      const target = prevW - 10 - Math.floor(r() * span);
-      w = Math.max(60, Math.min(prevW, target));
+  function canPlace(col, row, w, h) {
+    if (col < GROUND_COL_MIN || col + w - 1 > GROUND_COL_MAX) return false;
+    if (row < 0 || row + h - 1 >= towerHeight) return false;
+    for (let dx = 0; dx < w; dx++) {
+      for (let dy = 0; dy < h; dy++) {
+        if (occupied.has(`${col + dx},${row + dy}`)) return false;
+      }
     }
-
-    // 中心の許容オフセット: 前段の上に完全に乗る範囲（4px の安全マージン）
-    const maxOffset = Math.max(0, (prevW - w) / 2 - 4);
-    const offset = (r() - 0.5) * 2 * maxOffset * asymStrength;
-    const cx = prevCx + offset;
-
-    blocks.push({
-      x: cx,
-      y: Y_BASE - i * STEP,
-      w,
-      h: ROW_H,
-      hue: (baseHue + i * 28) % 360,
-    });
-
-    prevCx = cx;
-    prevW = w;
+    return true;
   }
 
-  const top = blocks[blocks.length - 1];
+  function place(col, row, w, h, hue) {
+    for (let dx = 0; dx < w; dx++) {
+      for (let dy = 0; dy < h; dy++) {
+        occupied.set(`${col + dx},${row + dy}`, true);
+      }
+    }
+    pieces.push({ col, row, w, h, hue });
+  }
+
+  // 下から上へ、左から右へ走査
+  for (let row = 0; row < towerHeight; row++) {
+    for (let col = GROUND_COL_MIN; col <= GROUND_COL_MAX; col++) {
+      if (occupied.has(`${col},${row}`)) continue;
+
+      // ランダムな順序でピース種類を試す
+      const tries = shuffle(typeBag, r);
+      let placed = false;
+      for (const t of tries) {
+        if (canPlace(col, row, t.w, t.h)) {
+          place(col, row, t.w, t.h, (baseHue + pieces.length * 17) % 360);
+          placed = true;
+          break;
+        }
+      }
+      if (!placed) {
+        // 1x1 で埋める
+        place(col, row, fillerType.w, fillerType.h, (baseHue + pieces.length * 17) % 360);
+      }
+    }
+  }
+
+  // 六角形は土台中央の真上、最上段の上に隙間あり
+  const centerCol = (GROUND_COL_MIN + GROUND_COL_MAX + 1) / 2; // 9
+  const towerTopY = GRID_BASE_Y - towerHeight * CELL_SIZE;
   const hex = {
-    x: top.x,
-    y: top.y - ROW_H / 2 - 36 - 6,
+    x: centerCol * CELL_SIZE,
+    y: towerTopY - 36 - 8,
     r: 36,
     hue: (baseHue + 200) % 360,
   };
 
-  return { name: `Stage ${stageNumber}`, blocks, hex };
+  return { name: `Stage ${stageNumber}`, pieces, hex };
 }

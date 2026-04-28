@@ -6,9 +6,10 @@ import { loadStageData, buildStage, teardownStage, TOTAL_STAGES } from './stage.
 import { markCleared, setLastPlayed, loadProgress } from './storage.js';
 
 const HEX_GROUND_TOL = 8;
-const HEX_VEL_THRESHOLD = 0.45;
-const HEX_ANG_VEL_THRESHOLD = 0.04;
+const HEX_VEL_THRESHOLD = 0.5;
+const HEX_ANG_VEL_THRESHOLD = 0.05;
 const STABLE_REQUIRED_MS = 500;
+const FADE_MS = 200;
 
 export class Game {
   constructor(renderer, hud, audio, effects) {
@@ -79,12 +80,12 @@ export class Game {
 
     for (const b of this.fadingBlocks) {
       b.render.fadeMs += dtMs;
-      if (b.render.fadeMs >= 200) {
+      if (b.render.fadeMs >= FADE_MS) {
         removeBody(this.world, b);
         this.fadingBlocks.delete(b);
         if (this.stageRefs) {
-          const i = this.stageRefs.blocks.indexOf(b);
-          if (i >= 0) this.stageRefs.blocks.splice(i, 1);
+          const i = this.stageRefs.pieces.indexOf(b);
+          if (i >= 0) this.stageRefs.pieces.splice(i, 1);
         }
       }
     }
@@ -145,14 +146,13 @@ export class Game {
     r.clear();
     r.beginWorld();
     r.drawBackground();
-    for (const b of this.stageRefs.blocks) r.drawBlock(b);
+    for (const p of this.stageRefs.pieces) r.drawBlock(p);
     r.drawHex(this.stageRefs.hex);
     r.drawEffects(this.effects);
     r.endWorld();
     r.drawFlash(this.effects.flash);
   }
 
-  // 前回プレイしたステージから再開
   initialStage() {
     const p = loadProgress();
     return Math.max(1, Math.min(TOTAL_STAGES, p.lastPlayed || 1));
