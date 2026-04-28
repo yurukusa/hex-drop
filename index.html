@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#0a0820">
+<title>Hex Drop</title>
+<link rel="stylesheet" href="./styles.css">
+<script src="https://cdn.jsdelivr.net/npm/matter-js@0.19.0/build/matter.min.js"></script>
+</head>
+<body>
+<div id="app">
+  <canvas id="stage"></canvas>
+  <div id="hud">
+    <div id="hud-top">
+      <span id="stage-label">Stage 1</span>
+      <div class="hud-btn-row">
+        <button id="btn-mute" class="hud-btn" type="button" aria-label="mute">🔊</button>
+        <button id="btn-restart" class="hud-btn" type="button" aria-label="restart">↻</button>
+      </div>
+    </div>
+    <div id="hud-overlay" class="hidden">
+      <div id="overlay-text"></div>
+      <button id="overlay-action" type="button"></button>
+    </div>
+  </div>
+</div>
+<script type="module" src="./src/main.js"></script>
+</body>
+</html>
