@@ -1,12 +1,18 @@
 import { Composite, Body } from './physics.js';
 import { makeBlock, makeHexagon, createGround, createOutOfBoundsSensors } from './physics.js';
+import { generateStage } from './level-gen.js';
 
-export const STAGE_IDS = ['stage-01', 'stage-02', 'stage-03'];
+export const TOTAL_STAGES = 150;
+const HANDWRITTEN = new Set([1, 2, 3]);
 
-export async function loadStageData(id) {
-  const res = await fetch(`./stages/${id}.json`, { cache: 'no-cache' });
-  if (!res.ok) throw new Error(`stage load failed: ${id} (${res.status})`);
-  return await res.json();
+export async function loadStageData(stageNumber) {
+  if (HANDWRITTEN.has(stageNumber)) {
+    const id = `stage-${String(stageNumber).padStart(2, '0')}`;
+    const res = await fetch(`./stages/${id}.json`, { cache: 'no-cache' });
+    if (!res.ok) throw new Error(`stage load failed: ${id} (${res.status})`);
+    return await res.json();
+  }
+  return generateStage(stageNumber);
 }
 
 export function buildStage(world, data) {
@@ -17,8 +23,7 @@ export function buildStage(world, data) {
     blocks.push(body);
   }
   const hex = makeHexagon(data.hex.x, data.hex.y, data.hex.r, data.hex.hue);
-  // Matter.Bodies.polygon の標準向きは頂点が上下に来る（angle=0 で角が下）。
-  // 子供向けに「面が下」の安定した見た目にしたいので、30度回して辺が水平になるようにする。
+  // Matter の polygon は標準で頂点が上下に来る。30度回して辺を水平に。
   Body.setAngle(hex, Math.PI / 6);
   Composite.add(world, hex);
 

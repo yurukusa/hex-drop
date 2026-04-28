@@ -6,9 +6,9 @@ export const WORLD_W = 720;
 export const WORLD_H = 1280;
 export const GROUND_Y = 1240;
 export const GROUND_HEIGHT = 60;
-// 土台幅は子供向けでも「左右にこぼす」緊張感が出る程度に絞る。
-// 全幅720に対して300（約42%）はぬるい。150（約21%）が成立点。
-export const GROUND_HALF_WIDTH = 150;
+// 子供向けでクリア可能性を担保するため、土台は広めに維持する。
+// 一度150まで絞ったが、操作してもクリアできないケースが増えたためぐらす指示で300に戻す。
+export const GROUND_HALF_WIDTH = 300;
 export const GROUND_X_MIN = WORLD_W / 2 - GROUND_HALF_WIDTH;
 export const GROUND_X_MAX = WORLD_W / 2 + GROUND_HALF_WIDTH;
 

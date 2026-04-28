@@ -20,7 +20,7 @@ async function boot() {
 
   new Input(canvas, renderer, (x, y) => game.handleTap(x, y));
 
-  await game.loadStage(0);
+  await game.loadStage(game.initialStage());
 
   let last = performance.now();
   function loop(now) {

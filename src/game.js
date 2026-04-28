@@ -2,8 +2,8 @@ import {
   createEngine, step, pointQuery, removeBody,
   GROUND_Y, GROUND_HEIGHT, GROUND_X_MIN, GROUND_X_MAX, WORLD_H,
 } from './physics.js';
-import { loadStageData, buildStage, teardownStage, STAGE_IDS } from './stage.js';
-import { markCleared } from './storage.js';
+import { loadStageData, buildStage, teardownStage, TOTAL_STAGES } from './stage.js';
+import { markCleared, setLastPlayed, loadProgress } from './storage.js';
 
 const HEX_GROUND_TOL = 8;
 const HEX_VEL_THRESHOLD = 0.45;
@@ -19,7 +19,7 @@ export class Game {
     this.engine = createEngine();
     this.world = this.engine.world;
 
-    this.stageIndex = 0;
+    this.stageNumber = 1;
     this.stageRefs = null;
     this.state = 'loading';
     this.stableMs = 0;
@@ -33,40 +33,36 @@ export class Game {
     this.hud.setMuted(false);
   }
 
-  get currentStageId() {
-    return STAGE_IDS[this.stageIndex];
-  }
-
-  async loadStage(index) {
+  async loadStage(stageNumber) {
     if (this.stageRefs) teardownStage(this.world, this.stageRefs);
-    this.stageIndex = Math.max(0, Math.min(STAGE_IDS.length - 1, index));
+    this.stageNumber = Math.max(1, Math.min(TOTAL_STAGES, stageNumber));
     this.state = 'loading';
     this.stableMs = 0;
     this.fadingBlocks.clear();
     this.effects.reset();
     this.hud.hideOverlay();
 
-    const data = await loadStageData(this.currentStageId);
+    const data = await loadStageData(this.stageNumber);
     this.stageRefs = buildStage(this.world, data);
-    this.hud.setStageLabel(data.name || `Stage ${this.stageIndex + 1}`);
+    this.hud.setStageLabel(`Stage ${this.stageNumber} / ${TOTAL_STAGES}`);
+    setLastPlayed(this.stageNumber);
     this.state = 'playing';
     this.audio.start();
   }
 
   restart() {
-    this.loadStage(this.stageIndex);
+    this.loadStage(this.stageNumber);
   }
 
   next() {
-    if (this.stageIndex < STAGE_IDS.length - 1) {
-      this.loadStage(this.stageIndex + 1);
+    if (this.stageNumber < TOTAL_STAGES) {
+      this.loadStage(this.stageNumber + 1);
     } else {
-      this.hud.showOverlay('All Clear!', 'Replay', () => this.loadStage(0));
+      this.hud.showOverlay('All Clear!', 'Replay', () => this.loadStage(1));
     }
   }
 
   handleTap(x, y) {
-    // 初回 tap で AudioContext を起こす
     this.audio.ensure();
     if (this.state !== 'playing') return;
     const hits = pointQuery(this.world, x, y);
@@ -125,15 +121,13 @@ export class Game {
       this.stableMs += dtMs;
       if (this.stableMs >= STABLE_REQUIRED_MS) {
         this.state = 'clear';
-        markCleared(this.currentStageId);
-        // 派手な演出: 六角形の位置からパーティクル放射＋画面フラッシュ
+        markCleared(this.stageNumber);
         this.effects.burst(hex.position.x, hex.position.y, hex.render.hue);
         this.audio.clear();
-        const last = this.stageIndex >= STAGE_IDS.length - 1;
-        // 演出を見せたいので overlay は少し遅らせる
+        const last = this.stageNumber >= TOTAL_STAGES;
         setTimeout(() => {
           if (this.state === 'clear') {
-            this.hud.showOverlay('Clear!', last ? 'Replay' : 'Next', () => last ? this.loadStage(0) : this.next());
+            this.hud.showOverlay('Clear!', last ? 'Replay' : 'Next', () => last ? this.loadStage(1) : this.next());
           }
         }, 700);
       }
@@ -156,5 +150,11 @@ export class Game {
     r.drawEffects(this.effects);
     r.endWorld();
     r.drawFlash(this.effects.flash);
+  }
+
+  // 前回プレイしたステージから再開
+  initialStage() {
+    const p = loadProgress();
+    return Math.max(1, Math.min(TOTAL_STAGES, p.lastPlayed || 1));
   }
 }
