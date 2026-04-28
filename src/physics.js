@@ -1,23 +1,25 @@
 const { Engine, World, Bodies, Body, Composite, Constraint, Query, Events } = window.Matter;
 
-export const WORLD_W = 720;
+// CELL_SIZE=64、WORLD_W=11*64=704 で割り切れて中央ズレなし
+export const WORLD_W = 704;
 export const WORLD_H = 1280;
 
-// 土台は壁と同じ幅 (8セル = 320px)。
+export const CELL_SIZE = 64;
+export const CELL_VISUAL = 60;
+export const GRID_COLS = WORLD_W / CELL_SIZE;          // 11
+
+// 土台は壁と同じ幅 (5セル = 320px)。
 export const GROUND_Y = 1240;
 export const GROUND_HEIGHT = 60;
 export const GROUND_HALF_WIDTH = 160;
 export const GROUND_X_MIN = WORLD_W / 2 - GROUND_HALF_WIDTH;
 export const GROUND_X_MAX = WORLD_W / 2 + GROUND_HALF_WIDTH;
 
-export const CELL_SIZE = 40;
-export const CELL_VISUAL = 36;
-export const GRID_COLS = WORLD_W / CELL_SIZE;
 export const GRID_BASE_Y = GROUND_Y - GROUND_HEIGHT / 2;
 
-// 壁範囲（8列）。中央 col 8.5、半幅 4 → col 5..12
-export const WALL_COL_MIN = 5;
-export const WALL_COL_MAX = 12;
+// 壁範囲（5列）。中央 col 5、左 col 3、右 col 7
+export const WALL_COL_MIN = 3;
+export const WALL_COL_MAX = 7;
 
 let nextPieceId = 1;
 export function newPieceId() { return nextPieceId++; }
@@ -25,7 +27,10 @@ export function newPieceId() { return nextPieceId++; }
 const PIECE_INSET = 2;
 
 export function createEngine() {
-  const engine = Engine.create({ gravity: { x: 0, y: 1.0, scale: 0.0010 } });
+  const engine = Engine.create({
+    gravity: { x: 0, y: 1.0, scale: 0.0007 },
+    enableSleeping: true,        // 低速 body を sleep 状態にして完全停止
+  });
   engine.positionIterations = 12;
   engine.velocityIterations = 12;
   engine.constraintIterations = 4;
@@ -62,7 +67,9 @@ export function makeRectPiece(col, row, wCells, hCells, hue, isStatic = false) {
     label: 'block',
     friction: 1.0,
     frictionStatic: 1.5,
-    density: 0.0015,
+    frictionAir: 0.05,
+    sleepThreshold: 30,        // 空気抵抗で微振動を減衰
+    density: 0.003,
     restitution: 0.0,
     slop: 0.04,
     isStatic: isStatic,
@@ -88,7 +95,9 @@ export function makeCellPiece(cells, hue, isStatic = false) {
       label: 'cell',
       friction: 1.0,
       frictionStatic: 1.5,
-      density: 0.0015,
+      frictionAir: 0.05,
+    sleepThreshold: 30,
+      density: 0.003,
       restitution: 0.0,
       slop: 0.04,
       isStatic: isStatic,
@@ -98,28 +107,34 @@ export function makeCellPiece(cells, hue, isStatic = false) {
     b.fadeMs = 0;
     return b;
   });
-  // 各セルのローカル outline（隣接セルがピース内にない辺だけ描画用）
+  // 各セルのローカル outline（隣接セルがピース内にない辺だけ）
+  // 描画範囲は CELL_SIZE/2 (= 20) を使う。物理サイズは CELL_VISUAL (= 36) で
+  // 隙間 4px あるが、描画上は 40 で「隣接 cell の辺が連続」して見える
+  // → ピース全体が一体化したアウトラインとして光る。
   const cellSet = new Set(cells.map(([c, r]) => `${c},${r}`));
-  const HV = CELL_VISUAL / 2;
+  const H = CELL_SIZE / 2;       // 横方向の描画半幅 (隣接 cell が見た目連続)
+  const V = CELL_VISUAL / 2;     // 縦方向の描画半幅 (実 cell サイズ、密着なので連続)
   bodies.forEach((b, idx) => {
     const [c, rr] = cells[idx];
     const segs = [];
-    if (!cellSet.has(`${c},${rr + 1}`)) segs.push({ x1: -HV, y1: -HV, x2:  HV, y2: -HV });
-    if (!cellSet.has(`${c},${rr - 1}`)) segs.push({ x1: -HV, y1:  HV, x2:  HV, y2:  HV });
-    if (!cellSet.has(`${c - 1},${rr}`)) segs.push({ x1: -HV, y1: -HV, x2: -HV, y2:  HV });
-    if (!cellSet.has(`${c + 1},${rr}`)) segs.push({ x1:  HV, y1: -HV, x2:  HV, y2:  HV });
+    // 上辺（Y方向は密着なので V）: x は隣接 cell との連続のため H
+    if (!cellSet.has(`${c},${rr + 1}`)) segs.push({ x1: -H, y1: -V, x2:  H, y2: -V });
+    if (!cellSet.has(`${c},${rr - 1}`)) segs.push({ x1: -H, y1:  V, x2:  H, y2:  V });
+    if (!cellSet.has(`${c - 1},${rr}`)) segs.push({ x1: -H, y1: -V, x2: -H, y2:  V });
+    if (!cellSet.has(`${c + 1},${rr}`)) segs.push({ x1:  H, y1: -V, x2:  H, y2:  V });
     b.outlineLocal = segs;
   });
-  // 隣接 cell に Constraint
-  // Constraint length は実際の cell 中心間距離に合わせる:
-  //   横方向 = CELL_SIZE (40)、縦方向 = CELL_VISUAL (36、密着配置のため)
+  // 全ペア cell を Constraint で剛結合。隣接ペアだけだと激しい衝突で
+  // ピースが折れ曲がる（ぐらす指摘）ため、対角ペアも含めて全結合する。
+  // length は実距離 (横=CELL_SIZE, 縦=CELL_VISUAL) のユークリッド距離。
   const constraints = [];
   for (let i = 0; i < cells.length; i++) {
     for (let j = i + 1; j < cells.length; j++) {
       const dx = cells[j][0] - cells[i][0];
       const dy = cells[j][1] - cells[i][1];
-      if (Math.abs(dx) + Math.abs(dy) !== 1) continue;
-      const length = (dx !== 0) ? CELL_SIZE : CELL_VISUAL;
+      const lenX = dx * CELL_SIZE;
+      const lenY = dy * CELL_VISUAL;
+      const length = Math.sqrt(lenX * lenX + lenY * lenY);
       constraints.push(Constraint.create({
         bodyA: bodies[i],
         bodyB: bodies[j],
@@ -127,7 +142,7 @@ export function makeCellPiece(cells, hue, isStatic = false) {
         pointB: { x: 0, y: 0 },
         length: length,
         stiffness: 1.0,
-        damping: 0.5,
+        damping: 1.0,        // 振動を完全に減衰
         render: { visible: false },
       }));
     }
@@ -149,7 +164,9 @@ export function makeHexagon(x, y, r, hue) {
     label: 'hex',
     friction: 0.55,
     frictionStatic: 0.85,
-    density: 0.0022,
+    frictionAir: 0.03,
+    sleepThreshold: 30,
+    density: 0.001,
     restitution: 0.05,
     render: { hue, r },
   });

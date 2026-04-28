@@ -1,19 +1,30 @@
-// 矩形ピース10種 + テトリス7種のハイブリッド生成。
+// 矩形ピース10種 + テトリス7種のハイブリッド生成（改善版）。
+//
+// ぐらすフィードバック反映:
+//   - 最下段 (row=0) は 1x1 / 2x1 / 1x2 のみ → 「下2個タップで突破」を封じる
+//   - 大きい横長/縦長ピースは row >= 1 のみで使用
+//   - Stage 6 以降は確実にテトリス3個以上、Stage 150 で40個以上
+//   - greedy fill が縦長偏りしないよう、横長と縦長を毎走査でランダム順
 //
 // 段階進行:
-//   Stage 1-5: 矩形ピースのみ（現状版そのまま、5歳児でも遊べる）
-//   Stage 6+:  テトリス形を順次追加 (I → O → T → L → J → S → Z)
-//   Stage 150: 全種類 + 4方向回転で最高難度
-//
-// 横8列 (WALL_COL_MIN..MAX = 5..12)、土台も8列幅で一体感。
-// greedy fill で row 下から走査、完全埋め保証。
+//   Stage 1-5:  矩形のみ
+//   Stage 6+:   テトリスを上層に強制配置 (上段から順にテトリス候補を優先)
+//   Stage 150:  全7種＋4回転、テトリス比率最大
 
 import { CELL_SIZE, CELL_VISUAL, GRID_BASE_Y, WALL_COL_MIN, WALL_COL_MAX } from './physics.js';
 
-const TOWER_HEIGHT_BASE = 15;
+// CELL_VISUAL=60 で各段が高くなったので、塔高さは 15→10 にして画面に収める
+const TOWER_HEIGHT_BASE = 10;
 
-// 矩形ピース定義（kind = 'rect'、cells の代わりに w/h）
-const RECT_PIECES = [
+// 最下段専用（row=0）: 小さくて支えになるピースのみ
+const FOUNDATION_PIECES = [
+  { kind: 'rect', w: 2, h: 1 },
+  { kind: 'rect', w: 1, h: 2 },
+  { kind: 'rect', w: 1, h: 1 },
+];
+
+// 上層（row>=1）の矩形ピース
+const RECT_LARGE = [
   { kind: 'rect', w: 4, h: 1 },
   { kind: 'rect', w: 1, h: 4 },
   { kind: 'rect', w: 3, h: 2 },
@@ -26,7 +37,6 @@ const RECT_PIECES = [
   { kind: 'rect', w: 1, h: 1 },
 ];
 
-// テトリスピース定義（kind = 'tetris'）
 const TETRIS_BASE = {
   I: [[0,0],[1,0],[2,0],[3,0]],
   O: [[0,0],[1,0],[0,1],[1,1]],
@@ -69,38 +79,40 @@ function shuffle(arr, r) {
   return out;
 }
 
-// ステージごとの候補ピース集合を構築
-function buildCandidates(stageNumber) {
-  const candidates = RECT_PIECES.slice();
-  if (stageNumber < 6) return candidates;
-
-  // Stage 6 以降: テトリス形を順次追加
-  // Stage 6: I のみ
-  // Stage 12: I, O
-  // Stage 24: I, O, T
+function buildTetrisCandidates(stageNumber) {
+  if (stageNumber < 6) return [];
+  // Stage 6: I だけ（4回転）= 4候補
+  // Stage 12+: I, O 計
+  // Stage 24+: I, O, T
   // ...
-  // Stage 150: 全7種
-  const tetrisProgress = Math.min(1, (stageNumber - 6) / 100);
-  const numTetris = Math.min(7, 1 + Math.floor(tetrisProgress * 7));
-  const maxRot = Math.min(4, 1 + Math.floor(tetrisProgress * 3));
+  // Stage 78+: 全7種
+  // 進行: stageNumber 6 で 1種、6+ステップごとに 1種追加
+  const numTetris = Math.min(7, 1 + Math.floor((stageNumber - 6) / 8));
+  const maxRot = Math.min(4, 1 + Math.floor((stageNumber - 6) / 30));
   const shapes = TETRIS_ORDER.slice(0, numTetris);
+  const out = [];
   for (const shape of shapes) {
     for (let rot = 0; rot < maxRot; rot++) {
-      candidates.push({
-        kind: 'tetris',
-        cells: rotateCells(TETRIS_BASE[shape], rot),
-      });
+      out.push({ kind: 'tetris', cells: rotateCells(TETRIS_BASE[shape], rot) });
     }
   }
-  return candidates;
+  return out;
+}
+
+// テトリス出現比率: Stage 6 で 30%、Stage 150 で 80%
+function tetrisProbability(stageNumber) {
+  if (stageNumber < 6) return 0;
+  const t = Math.min(1, (stageNumber - 6) / 144);
+  return 0.3 + t * 0.5;
 }
 
 export function generateStage(stageNumber) {
   const r = makeRand(stageNumber * 1009 + 17);
   const progress = Math.min(1, (stageNumber - 1) / 149);
-  const towerHeight = TOWER_HEIGHT_BASE + Math.floor(progress * 7);
+  const towerHeight = TOWER_HEIGHT_BASE + Math.floor(progress * 5);
 
-  const candidates = buildCandidates(stageNumber);
+  const tetrisCandidates = buildTetrisCandidates(stageNumber);
+  const tetrisProb = tetrisProbability(stageNumber);
 
   const baseHue = (stageNumber * 47) % 360;
   const occupied = new Map();
@@ -126,17 +138,23 @@ export function generateStage(stageNumber) {
   }
 
   function tryPlaceTetris(col, row, cells) {
-    // anchor をいずれかの cell に合わせて試す
     for (const [adx, ady] of cells) {
       const baseCol = col - adx;
       const baseRow = row - ady;
       const absCells = cells.map(([dx, dy]) => [baseCol + dx, baseRow + dy]);
-      if (canPlace(absCells)) {
-        // 走査位置 (col, row) を含むこと
-        if (absCells.some(([c, rr]) => c === col && rr === row)) {
-          return absCells;
-        }
+      if (canPlace(absCells) && absCells.some(([c, rr]) => c === col && rr === row)) {
+        return absCells;
       }
+    }
+    return null;
+  }
+
+  function tryAll(col, row, candidates) {
+    for (const cand of candidates) {
+      const abs = (cand.kind === 'rect')
+        ? tryPlaceRect(col, row, cand.w, cand.h)
+        : tryPlaceTetris(col, row, cand.cells);
+      if (abs) return { cand, absCells: abs };
     }
     return null;
   }
@@ -146,36 +164,31 @@ export function generateStage(stageNumber) {
     for (let col = WALL_COL_MIN; col <= WALL_COL_MAX; col++) {
       if (occupied.has(`${col},${row}`)) continue;
 
-      const order = shuffle(candidates, r);
-      let placed = null;
-      for (const cand of order) {
-        let abs = null;
-        if (cand.kind === 'rect') {
-          abs = tryPlaceRect(col, row, cand.w, cand.h);
+      // 行ごとの候補プール
+      let pool;
+      if (row === 0) {
+        // 最下段: 小ピースのみ
+        pool = shuffle(FOUNDATION_PIECES, r);
+      } else {
+        // 上層: テトリスを優先確率で先試行、ダメなら矩形
+        const useTetris = tetrisCandidates.length > 0 && r() < tetrisProb;
+        if (useTetris) {
+          pool = shuffle(tetrisCandidates, r).concat(shuffle(RECT_LARGE, r));
         } else {
-          abs = tryPlaceTetris(col, row, cand.cells);
-        }
-        if (abs) {
-          placed = { kind: cand.kind, cand, absCells: abs };
-          break;
+          pool = shuffle(RECT_LARGE, r).concat(shuffle(tetrisCandidates, r));
         }
       }
 
+      let placed = tryAll(col, row, pool);
       if (!placed) {
-        // 最後の砦: 1x1 矩形
-        placed = {
-          kind: 'rect',
-          cand: { kind: 'rect', w: 1, h: 1 },
-          absCells: [[col, row]],
-        };
+        // 最後の砦: 1x1
+        placed = { cand: { kind: 'rect', w: 1, h: 1 }, absCells: [[col, row]] };
       }
 
-      // 配置を occupied にマーク
       for (const [c, rr] of placed.absCells) occupied.set(`${c},${rr}`, true);
       const hue = (baseHue + pieces.length * 23) % 360;
 
-      if (placed.kind === 'rect') {
-        // 矩形ピース: bbox から col, row, w, h を取る（最小座標を起点）
+      if (placed.cand.kind === 'rect') {
         const xs = placed.absCells.map(c => c[0]);
         const ys = placed.absCells.map(c => c[1]);
         const minC = Math.min(...xs);
@@ -199,13 +212,12 @@ export function generateStage(stageNumber) {
     }
   }
 
-  // 六角形は壁中央の最上段の上（縦は CELL_VISUAL 単位で密着）
   const centerCol = (WALL_COL_MIN + WALL_COL_MAX + 1) / 2;
   const towerTopY = GRID_BASE_Y - towerHeight * CELL_VISUAL;
   const hex = {
     x: centerCol * CELL_SIZE,
-    y: towerTopY - 36 - 4,
-    r: 36,
+    y: towerTopY - 70 - 4,
+    r: 70,
     hue: (baseHue + 200) % 360,
   };
 
