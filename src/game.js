@@ -1,8 +1,8 @@
 import {
-  createEngine, step, pointQuery, removeBody,
+  createEngine, step, pointQuery,
   GROUND_Y, GROUND_HEIGHT, GROUND_X_MIN, GROUND_X_MAX, WORLD_H,
 } from './physics.js';
-import { loadStageData, buildStage, teardownStage, TOTAL_STAGES } from './stage.js';
+import { loadStageData, buildStage, teardownStage, removePiece, activateStage, TOTAL_STAGES } from './stage.js';
 import { markCleared, setLastPlayed, loadProgress } from './storage.js';
 
 const HEX_GROUND_TOL = 8;
@@ -24,7 +24,7 @@ export class Game {
     this.stageRefs = null;
     this.state = 'loading';
     this.stableMs = 0;
-    this.fadingBlocks = new Set();
+    this.fadingPieces = new Set();
 
     this.hud.bindRestart(() => this.restart());
     this.hud.bindMute(() => {
@@ -39,7 +39,7 @@ export class Game {
     this.stageNumber = Math.max(1, Math.min(TOTAL_STAGES, stageNumber));
     this.state = 'loading';
     this.stableMs = 0;
-    this.fadingBlocks.clear();
+    this.fadingPieces.clear();
     this.effects.reset();
     this.hud.hideOverlay();
 
@@ -47,13 +47,18 @@ export class Game {
     this.stageRefs = buildStage(this.world, data);
     this.hud.setStageLabel(`Stage ${this.stageNumber} / ${TOTAL_STAGES}`);
     setLastPlayed(this.stageNumber);
-    this.state = 'playing';
+    // 600ms 静止状態で見せた後に動的化（初期爆発を回避）
+    this.state = 'preplay';
     this.audio.start();
+    setTimeout(() => {
+      if (this.stageRefs && this.state === 'preplay') {
+        activateStage(this.stageRefs);
+        this.state = 'playing';
+      }
+    }, 600);
   }
 
-  restart() {
-    this.loadStage(this.stageNumber);
-  }
+  restart() { this.loadStage(this.stageNumber); }
 
   next() {
     if (this.stageNumber < TOTAL_STAGES) {
@@ -67,24 +72,31 @@ export class Game {
     this.audio.ensure();
     if (this.state !== 'playing') return;
     const hits = pointQuery(this.world, x, y);
-    const target = hits.find(b => b.label === 'block' && !this.fadingBlocks.has(b));
-    if (target) {
-      this.fadingBlocks.add(target);
-      target.render.fadeMs = 0.001;
-      this.audio.pop();
-    }
+    // 矩形ピースは label='block'、テトリスセルは label='cell'
+    const hit = hits.find(b => b.label === 'block' || b.label === 'cell');
+    if (!hit) return;
+    const piece = this.stageRefs?.pieces.find(p => p.pieceId === hit.pieceId);
+    if (!piece || this.fadingPieces.has(piece)) return;
+    this.fadingPieces.add(piece);
+    piece.fadeMs = 0.001;
+    this.audio.pop();
   }
 
   update(dtMs) {
     if (this.state === 'loading') return;
+    if (this.state === 'preplay') {
+      step(this.engine, dtMs);
+      this.effects.update(dtMs);
+      return;
+    }
 
-    for (const b of this.fadingBlocks) {
-      b.render.fadeMs += dtMs;
-      if (b.render.fadeMs >= FADE_MS) {
-        removeBody(this.world, b);
-        this.fadingBlocks.delete(b);
+    for (const piece of this.fadingPieces) {
+      piece.fadeMs += dtMs;
+      if (piece.fadeMs >= FADE_MS) {
+        removePiece(this.world, piece);
+        this.fadingPieces.delete(piece);
         if (this.stageRefs) {
-          const i = this.stageRefs.pieces.indexOf(b);
+          const i = this.stageRefs.pieces.indexOf(piece);
           if (i >= 0) this.stageRefs.pieces.splice(i, 1);
         }
       }
@@ -146,7 +158,7 @@ export class Game {
     r.clear();
     r.beginWorld();
     r.drawBackground();
-    for (const p of this.stageRefs.pieces) r.drawBlock(p);
+    for (const piece of this.stageRefs.pieces) r.drawPiece(piece);
     r.drawHex(this.stageRefs.hex);
     r.drawEffects(this.effects);
     r.endWorld();
