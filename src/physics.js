@@ -1,4 +1,4 @@
-const { Engine, World, Bodies, Body, Composite, Constraint, Query, Events } = window.Matter;
+const { Engine, World, Bodies, Body, Composite, Constraint, Query, Events, Sleeping } = window.Matter;
 
 // CELL_SIZE=64、WORLD_W=11*64=704 で割り切れて中央ズレなし
 export const WORLD_W = 704;
@@ -67,7 +67,7 @@ export function makeRectPiece(col, row, wCells, hCells, hue, isStatic = false) {
     label: 'block',
     friction: 1.0,
     frictionStatic: 1.5,
-    frictionAir: 0.05,
+    frictionAir: 0.005,
     sleepThreshold: 30,        // 空気抵抗で微振動を減衰
     density: 0.003,
     restitution: 0.0,
@@ -95,7 +95,7 @@ export function makeCellPiece(cells, hue, isStatic = false) {
       label: 'cell',
       friction: 1.0,
       frictionStatic: 1.5,
-      frictionAir: 0.05,
+      frictionAir: 0.005,
     sleepThreshold: 30,
       density: 0.003,
       restitution: 0.0,
@@ -164,9 +164,9 @@ export function makeHexagon(x, y, r, hue) {
     label: 'hex',
     friction: 0.55,
     frictionStatic: 0.85,
-    frictionAir: 0.03,
+    frictionAir: 0.005,
     sleepThreshold: 30,
-    density: 0.001,
+    density: 0.004,             // 重め: 落下ピースに弾かれにくい
     restitution: 0.05,
     render: { hue, r },
   });
@@ -181,4 +181,4 @@ export function step(engine, dtMs) {
   Engine.update(engine, dt);
 }
 
-export { Engine, World, Bodies, Body, Composite, Constraint, Query, Events };
+export { Engine, World, Bodies, Body, Composite, Constraint, Query, Events, Sleeping };
