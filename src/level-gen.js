@@ -189,8 +189,13 @@ export function generateStage(stageNumber) {
       }
 
       if (!placed) {
-        // 最後の砦: 1x1
-        placed = { cand: { kind: 'rect', w: 1, h: 1 }, absCells: [[col, row]] };
+        // 1x1 単発を避けるため、右隣が空きなら 2x1 で埋める（横方向に連結）
+        if (col + 1 <= WALL_COL_MAX && !occupied.has(`${col + 1},${row}`)) {
+          placed = { cand: { kind: 'rect', w: 2, h: 1 }, absCells: [[col, row], [col + 1, row]] };
+        } else {
+          // どうしても 1x1 が必要な場合のみ
+          placed = { cand: { kind: 'rect', w: 1, h: 1 }, absCells: [[col, row]] };
+        }
       }
 
       for (const [c, rr] of placed.absCells) occupied.set(`${c},${rr}`, true);
