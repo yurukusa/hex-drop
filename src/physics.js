@@ -67,8 +67,8 @@ export function makeRectPiece(col, row, wCells, hCells, hue, isStatic = false) {
     label: 'block',
     friction: 1.0,
     frictionStatic: 1.5,
-    frictionAir: 0.005,
-    sleepThreshold: 30,        // 空気抵抗で微振動を減衰
+    frictionAir: 0.02,
+    sleepThreshold: 20,        // 空気抵抗で微振動を減衰
     density: 0.003,
     restitution: 0.0,
     slop: 0.04,
@@ -99,8 +99,8 @@ export function makeCellPiece(cells, hue, isStatic = false) {
     label: 'piece',
     friction: 1.0,
     frictionStatic: 1.5,
-    frictionAir: 0.005,
-    sleepThreshold: 30,
+    frictionAir: 0.02,         // 振動減衰を強化 (複合剛体間の衝突連鎖を抑える)
+    sleepThreshold: 20,        // 早期 sleep で塔全体の微振動を停止
     density: 0.003,
     restitution: 0.0,
     slop: 0.04,
@@ -147,8 +147,8 @@ export function makeHexagon(x, y, r, hue) {
     label: 'hex',
     friction: 0.55,
     frictionStatic: 0.85,
-    frictionAir: 0.005,
-    sleepThreshold: 30,
+    frictionAir: 0.02,
+    sleepThreshold: 20,
     density: 0.004,             // 重め: 落下ピースに弾かれにくい
     restitution: 0.05,
     render: { hue, r },

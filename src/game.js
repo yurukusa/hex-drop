@@ -73,8 +73,9 @@ export class Game {
     this.audio.ensure();
     if (this.state !== 'playing') return;
     const hits = pointQuery(this.world, x, y);
-    // 矩形ピースは label='block'、テトリスセルは label='cell'
-    const hit = hits.find(b => b.label === 'block' || b.label === 'cell');
+    // ground/oob を除き、pieceId を持つ body を対象に
+    // (rect は label='block'、複合剛体は label='piece' or part の 'cell'、いずれも pieceId 付与済み)
+    const hit = hits.find(b => b.pieceId !== undefined);
     if (!hit) return;
     const piece = this.stageRefs?.pieces.find(p => p.pieceId === hit.pieceId);
     if (!piece || this.fadingPieces.has(piece)) return;
