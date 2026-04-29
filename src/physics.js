@@ -87,20 +87,24 @@ export function makeRectPiece(col, row, wCells, hCells, hue, isStatic = false) {
 // 戻り値: { type: 'cells', bodies, constraints, pieceId, hue, fadeMs }
 export function makeCellPiece(cells, hue, isStatic = false) {
   const pieceId = newPieceId();
+  // 負の group: 同じ group 同士は衝突しない (Matter.js 仕様)。
+  // 同ピース内の cell 同士は衝突解決をスキップ → Constraint だけで形を保つ。
+  // cell 同士の押し合いがなくなりガタガタ振動を解消。
+  const groupId = -pieceId;
   const bodies = cells.map(([col, row]) => {
     const x = (col + 0.5) * CELL_SIZE;
-    // 縦は CELL_VISUAL 単位で密着配置（重力下で動かない）
     const y = GRID_BASE_Y - (row + 0.5) * CELL_VISUAL;
     const b = Bodies.rectangle(x, y, CELL_VISUAL, CELL_VISUAL, {
       label: 'cell',
       friction: 1.0,
       frictionStatic: 1.5,
       frictionAir: 0.005,
-    sleepThreshold: 30,
+      sleepThreshold: 30,
       density: 0.003,
       restitution: 0.0,
       slop: 0.04,
       isStatic: isStatic,
+      collisionFilter: { group: groupId },
     });
     b.pieceId = pieceId;
     b.hue = hue;
