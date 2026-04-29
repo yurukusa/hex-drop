@@ -81,86 +81,65 @@ export function makeRectPiece(col, row, wCells, hCells, hue, isStatic = false) {
   return { type: 'rect', body, pieceId, hue, fadeMs: 0 };
 }
 
-// テトリス形ピース（Stage 6以降の追加要素）
-// 各セルを独立 body にして、隣接セル間を Constraint で剛結合。
-// L/T/S/Z 形が物理的に他のピースと噛み合う。
-// 戻り値: { type: 'cells', bodies, constraints, pieceId, hue, fadeMs }
+// テトリス形ピース。Matter.Body.create({ parts }) で複数 cell を1つの剛体に統合。
+// 真の複合剛体 - cell 同士は物理的に「同じ1つの body」として動く。
+// Constraint 不要、cell 間の押し合いゼロ、完全剛体。
+// 戻り値: { type: 'cells', body, pieceId, hue, fadeMs }
 export function makeCellPiece(cells, hue, isStatic = false) {
   const pieceId = newPieceId();
-  // 負の group: 同じ group 同士は衝突しない (Matter.js 仕様)。
-  // 同ピース内の cell 同士は衝突解決をスキップ → Constraint だけで形を保つ。
-  // cell 同士の押し合いがなくなりガタガタ振動を解消。
-  const groupId = -pieceId;
-  const bodies = cells.map(([col, row]) => {
+  // 各 cell の body を作る（parts 用、物理プロパティは parent から継承）
+  const parts = cells.map(([col, row]) => {
     const x = (col + 0.5) * CELL_SIZE;
     const y = GRID_BASE_Y - (row + 0.5) * CELL_VISUAL;
-    const b = Bodies.rectangle(x, y, CELL_VISUAL, CELL_VISUAL, {
-      label: 'cell',
-      friction: 1.0,
-      frictionStatic: 1.5,
-      frictionAir: 0.005,
-      sleepThreshold: 30,
-      density: 0.003,
-      restitution: 0.0,
-      slop: 0.04,
-      isStatic: isStatic,
-      collisionFilter: { group: groupId },
-    });
-    b.pieceId = pieceId;
-    b.hue = hue;
-    b.fadeMs = 0;
-    return b;
+    return Bodies.rectangle(x, y, CELL_VISUAL, CELL_VISUAL, { label: 'cell' });
   });
-  // 各セルのローカル outline（隣接セルがピース内にない辺だけ）
-  // 描画範囲は CELL_SIZE/2 (= 20) を使う。物理サイズは CELL_VISUAL (= 36) で
-  // 隙間 4px あるが、描画上は 40 で「隣接 cell の辺が連続」して見える
-  // → ピース全体が一体化したアウトラインとして光る。
-  const cellSet = new Set(cells.map(([c, r]) => `${c},${r}`));
-  const H = CELL_SIZE / 2;       // 横方向の描画半幅 (隣接 cell が見た目連続)
-  const V = CELL_VISUAL / 2;     // 縦方向の描画半幅 (実 cell サイズ、密着なので連続)
-  bodies.forEach((b, idx) => {
-    const [c, rr] = cells[idx];
-    const segs = [];
-    // 上辺（Y方向は密着なので V）: x は隣接 cell との連続のため H
-    if (!cellSet.has(`${c},${rr + 1}`)) segs.push({ x1: -H, y1: -V, x2:  H, y2: -V });
-    if (!cellSet.has(`${c},${rr - 1}`)) segs.push({ x1: -H, y1:  V, x2:  H, y2:  V });
-    if (!cellSet.has(`${c - 1},${rr}`)) segs.push({ x1: -H, y1: -V, x2: -H, y2:  V });
-    if (!cellSet.has(`${c + 1},${rr}`)) segs.push({ x1:  H, y1: -V, x2:  H, y2:  V });
-    b.outlineLocal = segs;
+  // 複合剛体生成
+  const piece = Body.create({
+    parts,
+    label: 'piece',
+    friction: 1.0,
+    frictionStatic: 1.5,
+    frictionAir: 0.005,
+    sleepThreshold: 30,
+    density: 0.003,
+    restitution: 0.0,
+    slop: 0.04,
+    isStatic: isStatic,
   });
-  // 全ペア cell を Constraint で剛結合。隣接ペアだけだと激しい衝突で
-  // ピースが折れ曲がる（ぐらす指摘）ため、対角ペアも含めて全結合する。
-  // length は実距離 (横=CELL_SIZE, 縦=CELL_VISUAL) のユークリッド距離。
-  const constraints = [];
-  for (let i = 0; i < cells.length; i++) {
-    for (let j = i + 1; j < cells.length; j++) {
-      const dx = cells[j][0] - cells[i][0];
-      const dy = cells[j][1] - cells[i][1];
-      const lenX = dx * CELL_SIZE;
-      const lenY = dy * CELL_VISUAL;
-      const length = Math.sqrt(lenX * lenX + lenY * lenY);
-      constraints.push(Constraint.create({
-        bodyA: bodies[i],
-        bodyB: bodies[j],
-        pointA: { x: 0, y: 0 },
-        pointB: { x: 0, y: 0 },
-        length: length,
-        stiffness: 1.0,
-        damping: 1.0,        // 振動を完全に減衰
-        render: { visible: false },
-      }));
-    }
+  piece.pieceId = pieceId;
+  piece.hue = hue;
+  piece.fadeMs = 0;
+  // 子 part にも pieceId/hue を伝播 (タップ判定で part にヒットするため)
+  for (let i = 1; i < piece.parts.length; i++) {
+    piece.parts[i].pieceId = pieceId;
+    piece.parts[i].hue = hue;
   }
-  return { type: 'cells', bodies, constraints, pieceId, hue, fadeMs: 0 };
+
+  // outline: 各 cell のローカル offset (parent.position 基準) で線分を作る。
+  // 隣接 cell が同 piece 内になければ外周辺。
+  const cellSet = new Set(cells.map(([c, r]) => `${c},${r}`));
+  const H = CELL_SIZE / 2;
+  const V = CELL_VISUAL / 2;
+  const segs = [];
+  for (let i = 0; i < cells.length; i++) {
+    const [c, rr] = cells[i];
+    const part = piece.parts[i + 1];   // parts[0] は parent 自身
+    const ox = part.position.x - piece.position.x;
+    const oy = part.position.y - piece.position.y;
+    if (!cellSet.has(`${c},${rr + 1}`)) segs.push({ x1: ox - H, y1: oy - V, x2: ox + H, y2: oy - V });
+    if (!cellSet.has(`${c},${rr - 1}`)) segs.push({ x1: ox - H, y1: oy + V, x2: ox + H, y2: oy + V });
+    if (!cellSet.has(`${c - 1},${rr}`)) segs.push({ x1: ox - H, y1: oy - V, x2: ox - H, y2: oy + V });
+    if (!cellSet.has(`${c + 1},${rr}`)) segs.push({ x1: ox + H, y1: oy - V, x2: ox + H, y2: oy + V });
+  }
+  piece.outlineLocal = segs;
+
+  return { type: 'cells', body: piece, pieceId, hue, fadeMs: 0 };
 }
 
 // 全 piece を動的化（プレイ開始時に呼ぶ）
 export function activatePiece(piece) {
-  if (piece.type === 'rect') {
-    Body.setStatic(piece.body, false);
-  } else {
-    for (const b of piece.bodies) Body.setStatic(b, false);
-  }
+  // 複合剛体も単一矩形も、parent body 1つを setStatic(false)
+  Body.setStatic(piece.body, false);
 }
 
 export function makeHexagon(x, y, r, hue) {

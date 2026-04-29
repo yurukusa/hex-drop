@@ -137,45 +137,32 @@ export class Renderer {
   }
 
   // テトリス形ピース。各セル独立 body、outline は body にローカル線分として保存済み。
-  // ピース全体としてアウトラインだけ描画 → L/T/S/Z 形が一体化して見える。
+  // 複合剛体ピース。piece.body の position/angle と outlineLocal で一括描画。
   drawCellsPiece(piece) {
+    if (this.isOffscreen(piece.body)) return;
     const ctx = this.ctx;
     const hue = piece.hue;
     const alpha = piece.fadeMs > 0 ? Math.max(0, 1 - piece.fadeMs / 200) : 1;
-
-    // 全 cell が画面外ならスキップ
-    let allOff = true;
-    for (const b of piece.bodies) {
-      if (!this.isOffscreen(b)) { allOff = false; break; }
-    }
-    if (allOff) return;
+    const segs = piece.body.outlineLocal || [];
 
     ctx.save();
+    ctx.translate(piece.body.position.x, piece.body.position.y);
+    ctx.rotate(piece.body.angle);
     ctx.globalAlpha = alpha;
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
+
+    ctx.beginPath();
+    for (const s of segs) {
+      ctx.moveTo(s.x1, s.y1);
+      ctx.lineTo(s.x2, s.y2);
+    }
 
     // 外側ハロー
     ctx.shadowBlur = 26;
     ctx.shadowColor = `hsl(${hue}, 90%, 60%)`;
     ctx.lineWidth = 3;
     ctx.strokeStyle = `hsl(${hue}, 95%, 72%)`;
-    ctx.beginPath();
-    for (const cell of piece.bodies) {
-      const segs = cell.outlineLocal || [];
-      const cx = cell.position.x;
-      const cy = cell.position.y;
-      const ang = cell.angle;
-      const ca = Math.cos(ang), sa = Math.sin(ang);
-      for (const s of segs) {
-        const x1 = cx + s.x1 * ca - s.y1 * sa;
-        const y1 = cy + s.x1 * sa + s.y1 * ca;
-        const x2 = cx + s.x2 * ca - s.y2 * sa;
-        const y2 = cy + s.x2 * sa + s.y2 * ca;
-        ctx.moveTo(x1, y1);
-        ctx.lineTo(x2, y2);
-      }
-    }
     ctx.stroke();
 
     // 内側白芯

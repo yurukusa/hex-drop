@@ -88,8 +88,8 @@ export class Game {
   wakeAll() {
     if (!this.stageRefs) return;
     for (const p of this.stageRefs.pieces) {
-      if (p.type === 'rect') Sleeping.set(p.body, false);
-      else for (const b of p.bodies) Sleeping.set(b, false);
+      // 複合剛体も単一矩形も parent body 1つで wake
+      Sleeping.set(p.body, false);
     }
     Sleeping.set(this.stageRefs.hex, false);
   }
