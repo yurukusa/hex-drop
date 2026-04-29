@@ -1,6 +1,7 @@
 import {
   createEngine, step, pointQuery,
   GROUND_Y, GROUND_HEIGHT, GROUND_X_MIN, GROUND_X_MAX, WORLD_H,
+  Sleeping, Composite,
 } from './physics.js';
 import { loadStageData, buildStage, teardownStage, removePiece, activateStage, TOTAL_STAGES } from './stage.js';
 import { markCleared, setLastPlayed, loadProgress } from './storage.js';
@@ -80,6 +81,17 @@ export class Game {
     this.fadingPieces.add(piece);
     piece.fadeMs = 0.001;
     this.audio.pop();
+    this.wakeAll();
+  }
+
+  // sleeping 状態の body を全て起こす（ピース削除で連鎖落下が起きるように）
+  wakeAll() {
+    if (!this.stageRefs) return;
+    for (const p of this.stageRefs.pieces) {
+      if (p.type === 'rect') Sleeping.set(p.body, false);
+      else for (const b of p.bodies) Sleeping.set(b, false);
+    }
+    Sleeping.set(this.stageRefs.hex, false);
   }
 
   update(dtMs) {

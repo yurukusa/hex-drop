@@ -216,8 +216,8 @@ export function generateStage(stageNumber) {
   const towerTopY = GRID_BASE_Y - towerHeight * CELL_VISUAL;
   const hex = {
     x: centerCol * CELL_SIZE,
-    y: towerTopY - 70 - 4,
-    r: 70,
+    y: towerTopY - 48 - 4,
+    r: 48,
     hue: (baseHue + 200) % 360,
   };
 
