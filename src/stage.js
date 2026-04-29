@@ -18,8 +18,7 @@ export function buildStage(world, data) {
       pieces.push(piece);
     } else {
       const piece = makeCellPiece(p.cells, p.hue, /*isStatic=*/ true);
-      for (const b of piece.bodies) Composite.add(world, b);
-      for (const c of piece.constraints) Composite.add(world, c);
+      Composite.add(world, piece.body);
       pieces.push(piece);
     }
   }
@@ -48,8 +47,7 @@ export function removePiece(world, piece) {
   if (piece.type === 'rect') {
     Composite.remove(world, piece.body);
   } else {
-    for (const c of piece.constraints) Composite.remove(world, c);
-    for (const b of piece.bodies) Composite.remove(world, b);
+    Composite.remove(world, piece.body);
   }
 }
 
